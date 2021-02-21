@@ -10,8 +10,9 @@ const int UP = 5;
 const int LED = 6;
 
 // other settings
-const int HOLD_TIMEOUT = 300;   // how long a button needs to be held down before it triggers an input and resets
-const int BOUNCE_TIMEOUT = 35;  // the minimum time a button needs to be held down to count as a click
+const int HISTORY_LENGTH = 10;
+#define HOLD_TIMEOUT   300   // how long a button needs to be held down before it triggers an input and resets
+#define BOUNCE_TIMEOUT  35  // the minimum time a button needs to be held down to count as a click
 
 void setup() {
 #ifdef CEREAL
@@ -27,61 +28,72 @@ void setup() {
   pinMode(LEFT, INPUT_PULLDOWN);  
   pinMode(UP, INPUT_PULLDOWN);
   pinMode(LED, OUTPUT);
-  
+
   // in ms (converted to 0.625ms units) - range 20ms to 10.24s - default 80ms
-  RFduinoBLE.advertisementInterval = 250;
+  RFduinoBLE.advertisementInterval = 20;
   // -20 dBm to +4 dBm - default +4 dBm
-  RFduinoBLE.txPowerLevel = 0;
+  //RFduinoBLE.txPowerLevel = 0;
   RFduinoBLE.deviceName = "RFClicker";
   RFduinoBLE.advertisementData = "clicker";
   RFduinoBLE.begin(); 
 }
 
-int8_t last_button_status = -1;
+char button_status = 0;
+uint8_t count = 0;
 int32_t right_millis = 0;
-int32_t right_holdtime = 0;
-int32_t right_last_holdtime = 0;
+bool right_held = false;
 int32_t down_millis = 0;
+bool down_held = false;
 int32_t left_millis = 0;
+bool left_held = false;
 int32_t up_millis = 0;
+bool up_held = false;
 bool connected = false;
 uint32_t now = 0;
-
+char button_history[HISTORY_LENGTH*2];
 void loop() {
   now = millis();
   if (connected) {
-    uint8_t right_click = 0;
-    uint8_t down_click = 0;
-    
-    uint8_t right = digitalRead(RIGHT);
-    uint8_t down = digitalRead(DOWN);
-    uint8_t left = digitalRead(LEFT);
-    uint8_t up = digitalRead(UP);
-
-    uint8_t button_status = 0;
-
-    if (right == HIGH) {
-      //Serial.println("HIGH");
+    if (digitalRead(RIGHT) == HIGH) {
       if (right_millis == 0) {
+        // button was *just* pressed
         right_millis = now;
       }
       else if ((now - right_millis) > HOLD_TIMEOUT)  {
+        // if the button is held for a long time, consider that a click and restart
+        //   the clock
 #ifdef CEREAL
         Serial.println("right button held");
 #endif
-        button_status += 1;
+        button_status |= (1 << 0);
         right_millis = now;
+        // note that we've been in this long enough to consider it a hold so there's no
+        //   we can avoid triggering a "normal" click after the release if we've gone
+        //   BOUNCE_TIMEOUT over into the next hold period.
+        right_held = true;
+      }
+      else {
+        // the button hasn't been held down long enough to count as a click
+        button_status &= ~(1 << 0);
       }
     }
-    else if (right == LOW && right_millis > 0 && (now - right_millis) >= BOUNCE_TIMEOUT) {
+    else { // RIGHT == LOW
+      if (right_millis > 0 && (now - right_millis) >= BOUNCE_TIMEOUT && !right_held) {
+        // send a 'clicked' event
 #ifdef CEREAL
-      Serial.println("right button clicked");
+        Serial.println("right button clicked");
 #endif
-      button_status += 1;
+        button_status |= (1 << 0);
+      }
+      else {
+        // clear the click
+        button_status &= ~(1 << 0);
+      }
       right_millis = 0;
+      right_held = false;
     }
-    
-    if (down == HIGH) {
+
+    if (digitalRead(DOWN) == HIGH) {
       if (down_millis == 0) {
         down_millis = now;
       }
@@ -89,19 +101,29 @@ void loop() {
 #ifdef CEREAL
         Serial.println("down button held");
 #endif
-        button_status += 2;
+        button_status |= (1 << 1);
         down_millis = now;
+        down_held = true;
+      }
+      else {
+        button_status &= ~(1 << 1);
       }
     }  
-    else if (down == LOW && down_millis > 0 && (now - down_millis) >= BOUNCE_TIMEOUT ) {
+    else {
+      if (down_millis > 0 && (now - down_millis) >= BOUNCE_TIMEOUT && !down_held) {
 #ifdef CEREAL
-      Serial.println("down button clicked");
+        Serial.println("down button clicked");
 #endif
-      button_status += 2;
+        button_status |= (1 << 1);
+      }
+      else {
+        button_status &= ~(1 << 1);
+      }
       down_millis = 0;
+      down_held = false;
     }
 
-    if (left == HIGH) {
+    if (digitalRead(LEFT) == HIGH) {
       if (left_millis == 0) {
         left_millis = now;
       }
@@ -109,19 +131,29 @@ void loop() {
 #ifdef CEREAL
         Serial.println("left button held");
 #endif
-        button_status += 4;
+        button_status |= (1 << 2);
         left_millis = now;
+        left_held = true;
+      }
+      else {
+        button_status &= ~(1 << 2);
       }
     }
-    else if (left == LOW && left_millis > 0 && (now - left_millis) >= BOUNCE_TIMEOUT ) {
+    else { // LEFT == LOW
+      if (left_millis > 0 && (now - left_millis) >= BOUNCE_TIMEOUT && !left_held) {
 #ifdef CEREAL
-      Serial.println("left button clicked");
+        Serial.println("left button clicked");
 #endif
-      button_status += 4;
+        button_status |= (1 << 2);
+      }
+      else {
+        button_status &= ~(1 << 2);
+      }
       left_millis = 0;
+      left_held = false;
     }
     
-    if (up == HIGH) {
+    if (digitalRead(UP) == HIGH) {
       if (up_millis == 0) {
         up_millis = now;
       }
@@ -129,26 +161,36 @@ void loop() {
 #ifdef CEREAL
         Serial.println("up button held");
 #endif
-        button_status += 8;
+        button_status |= (1 << 3);
         up_millis = now;
+        up_held = true;
+      }
+      else {
+        button_status &= ~(1 << 3);
       }
     }
-    else if (up == LOW && up_millis > 0 && (now - up_millis) >= BOUNCE_TIMEOUT) {
+    else { // UP == LOW
+      if (up_millis > 0 && (now - up_millis) >= BOUNCE_TIMEOUT && !up_held) {
 #ifdef CEREAL
-      Serial.println("up button clicked");
+        Serial.println("up button clicked");
 #endif
-      button_status += 8;
+        button_status = button_status | (1 << 3);
+      }
+      else {
+        button_status = button_status & ~(1 << 3);
+      }
       up_millis = 0;
+      up_held = false;
     }
-
-
-    if (button_status != last_button_status) {
-#ifdef CEREAL
-      Serial.print("sending:");
-      Serial.println(button_status);
-#endif
-      RFduinoBLE.send(button_status);
-      last_button_status = button_status;
+    
+    if (button_status != button_history[(HISTORY_LENGTH*2)-1]) {
+      count++;
+      if (count == 0) {
+        count = 1;
+      }
+      push(count, button_history, HISTORY_LENGTH*2);
+      push(button_status, button_history, HISTORY_LENGTH*2);
+      RFduinoBLE.send(button_history, HISTORY_LENGTH*2);
     }
   } // connected
 } // loop()
@@ -157,13 +199,30 @@ void RFduinoBLE_onConnect() {
 #ifdef CEREAL
   Serial.println("connected()");
 #endif
+  fillArray(0, button_history, HISTORY_LENGTH*2);
+  RFduinoBLE.send(button_history, HISTORY_LENGTH*2);
+  count = 0;
   digitalWrite(LED, HIGH);
   connected = true;
 }
+
 void RFduinoBLE_onDisconnect() {
 #ifdef CEREAL
   Serial.println("disconnected()");
 #endif
   digitalWrite(LED, LOW);
   connected = false;
+}
+
+void push(char value, char *foo, uint16_t size) {
+  for (uint16_t i = 1; i<size; i++) {
+    foo[i-1] = foo[i];
+  }
+  foo[size-1] = value;
+}
+
+void fillArray(char value, char *foo, uint16_t size) {
+  for (uint16_t i = 0; i<size; i++) {
+    foo[i] = value;
+  }
 }
