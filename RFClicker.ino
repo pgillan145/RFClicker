@@ -1,8 +1,9 @@
 #include <RFduinoBLE.h>
 
-#undef CEREAL
+#define CEREAL
 
 // pins
+const int POWER = 1;
 const int RIGHT = 2;
 const int DOWN = 3;
 const int LEFT = 4;
@@ -12,7 +13,8 @@ const int LED = 6;
 // other settings
 const int HISTORY_LENGTH = 10;
 #define HOLD_TIMEOUT   300   // how long a button needs to be held down before it triggers an input and resets
-#define BOUNCE_TIMEOUT  35  // the minimum time a button needs to be held down to count as a click
+#define BOUNCE_TIMEOUT  35   // the minimum time a button needs to be held down to count as a click
+#define SEND_BLINK_TIME 100  // how long the connection light brightness should jump when data is "sent".
 
 void setup() {
 #ifdef CEREAL
@@ -22,7 +24,7 @@ void setup() {
 #ifdef CEREAL
   Serial.println("setup()");
 #endif
-
+  pinMode(POWER, OUTPUT);
   pinMode(RIGHT, INPUT_PULLDOWN);
   pinMode(DOWN, INPUT_PULLDOWN);
   pinMode(LEFT, INPUT_PULLDOWN);  
@@ -36,6 +38,13 @@ void setup() {
   RFduinoBLE.deviceName = "RFClicker";
   RFduinoBLE.advertisementData = "clicker";
   RFduinoBLE.begin(); 
+  digitalWrite(LED, LOW);
+  digitalWrite(POWER, HIGH);
+  
+#ifdef CEREAL
+  Serial.println("done with setup()");
+#endif
+  
 }
 
 char button_status = 0;
@@ -50,6 +59,7 @@ int32_t up_millis = 0;
 bool up_held = false;
 bool connected = false;
 uint32_t now = 0;
+uint32_t last_send = 0;
 char button_history[HISTORY_LENGTH*2];
 void loop() {
   now = millis();
@@ -190,7 +200,12 @@ void loop() {
       }
       push(count, button_history, HISTORY_LENGTH*2);
       push(button_status, button_history, HISTORY_LENGTH*2);
+      digitalWrite(LED, HIGH);
+      last_send = now;
       RFduinoBLE.send(button_history, HISTORY_LENGTH*2);
+    }
+    if (now - last_send > SEND_BLINK_TIME) {
+      analogWrite(LED, 128);
     }
   } // connected
 } // loop()
@@ -202,7 +217,7 @@ void RFduinoBLE_onConnect() {
   fillArray(0, button_history, HISTORY_LENGTH*2);
   RFduinoBLE.send(button_history, HISTORY_LENGTH*2);
   count = 0;
-  digitalWrite(LED, HIGH);
+  analogWrite(LED, 128);
   connected = true;
 }
 
