@@ -1,14 +1,14 @@
 #include <RFduinoBLE.h>
 
-#define CEREAL
+#undef CEREAL
 
 // pins
 const int POWER = 1;
-const int RIGHT = 2;
-const int DOWN = 3;
+const int RIGHT = 6;
+const int DOWN = 5;
 const int LEFT = 4;
-const int UP = 5;
-const int LED = 6;
+const int UP = 3;
+const int LED = 2;
 
 // other settings
 const int HISTORY_LENGTH = 10;
